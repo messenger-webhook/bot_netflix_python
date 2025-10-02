@@ -1,49 +1,47 @@
 from flask import Flask, request
 import requests
-import json
+import os
 
 app = Flask(__name__)
 
-PAGE_ACCESS_TOKEN = "EAAJ3CeIrHP4BP…ton_token…"
-VERIFY_TOKEN = "b370b63a6cafa7a144131c8c079aca96"
+# Ton token d'accès Facebook Page
+PAGE_ACCESS_TOKEN = "EAAJ3CeIrHP4BPkmTykfsp98jBQgxH58Vw2dMq1eGs8lhabQT08REtqN5TFiZAOzsFTi2qjgtda0Dxk14gNlwsUndIRhJBY80OzJ9b7zqF2hGDZAQn3f5qJn1LD6D5F841ax21i4l5c7kQxLuZBvaFDsTZCByv3HrOUYblId3dX3n0OUdIRTDkgsANiKeUPhfiC0uGp6ZBJQZAPeCnN4Fq3cUYLAWy37bFj0CynGJdaAZDZD"
 
-@app.route('/webhook', methods=['GET', 'POST'])
-def webhook():
-    if request.method == 'GET':
-        # Vérification de Facebook
-        token_sent = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
-        if token_sent == VERIFY_TOKEN:
-            return challenge
-        return "Token incorrect", 403
-
-    if request.method == 'POST':
-        # Gestion des messages reçus
-        output = request.get_json()
-        print("Webhook reçu:", json.dumps(output, indent=2))
-
-        for entry in output.get('entry', []):
-            for messaging_event in entry.get('messaging', []):
-                sender_id = messaging_event['sender']['id']
-
-                if 'message' in messaging_event and 'text' in messaging_event['message']:
-                    message_text = messaging_event['message']['text']
-                    print(f"Message reçu de {sender_id}: {message_text}")
-                    # Répond automatiquement
-                    send_message(sender_id, f"Tu as envoyé : {message_text}")
-
-        return "EVENT_RECEIVED", 200
-
+# Fonction pour envoyer un message
 def send_message(recipient_id, message_text):
-    """Envoie un message à l'utilisateur via l'API Messenger"""
     url = f"https://graph.facebook.com/v23.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    headers = {"Content-Type": "application/json"}
     payload = {
         "recipient": {"id": recipient_id},
         "message": {"text": message_text}
     }
-    response = requests.post(url, headers=headers, json=payload)
-    print("Réponse FB:", response.text)
+    response = requests.post(url, json=payload)
+    return response.json()
+
+# Webhook de vérification
+@app.route('/webhook', methods=['GET'])
+def verify_webhook():
+    VERIFY_TOKEN = "b370b63a6cafa7a144131c8c079aca96"
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return challenge
+    return "Erreur de vérification", 403
+
+# Webhook de réception des messages
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    data = request.get_json()
+    if data['object'] == "page":
+        for entry in data['entry']:
+            for messaging_event in entry.get('messaging', []):
+                sender_id = messaging_event['sender']['id']
+                # Ici tu peux personnaliser la réponse automatique
+                reply = ("Bonjour ! \n"
+                         "1️⃣ Voulez-vous renouveler votre abonnement ?\n"
+                         "2️⃣ Voulez-vous un code d'identification du compte ?")
+                send_message(sender_id, reply)
+    return "EVENT_RECEIVED", 200
 
 if __name__ == '__main__':
     app.run(debug=True)
