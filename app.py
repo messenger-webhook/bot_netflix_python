@@ -1,41 +1,65 @@
-from flask import Flask, request
-import requests
 import os
+import requests
+from flask import Flask, request
 
 app = Flask(__name__)
 
-PAGE_ACCESS_TOKEN = "EAAJ3CeIrHP4BPmTuzRmbnw1zDwTixMQK6JZBU2LOSKvW5dAPjoR7UkHGphnZBGTYF8ZBmWTQDavN23WGAfMNoSz0FJXmPDBUNxbC0haS4x3AkzhFOtb4zSDo0EoZADRTKLUM0CFQmRpqzXBHctBkby4sIy2AX46JSaIk6xheM3RGZCdZCZCLt9VM50GmZBAe7UFVnLVqZCYKd3oqQsfWCiD4Nszhs7ZBeYUADAxb6IVnoZD"
+PAGE_ACCESS_TOKEN =EAAJ3CeIrHP4BPpEtPh7ZBsQDJWZAxuejcvZAgd1ZCqGt0LXAZCCJ4UjV0vslwUMxr4aRXpEFpaA2ZAPSb4Eg6e2HeTlGa0D2dqpDR2RFFZCLBMNtjjFVFXfBLvzheeB6YZAPuiaZCEOaeTZBi3HRZBNRA7GFGCeh20p18cH9u4hUfOu3rUBzPvGFVuEZAVdDZAbQcbFZCMMH664FMtTW7WRvgiuOm1hTAse8IiuRKtI5c7Djf2pwZDZD
+VERIFY_TOKEN =b370b63a6cafa7a144131c8c079aca96  # ton verify_token
 
-VERIFY_TOKEN = "b370b63a6cafa7a144131c8c079aca96"
+@app.route("/", methods=["GET"])
+def home():
+    return "Bot Messenger actif ✅"
 
-@app.route('/webhook', methods=['GET'])
+# ✅ Vérification webhook
+@app.route("/webhook", methods=["GET"])
 def verify():
-    # Vérification du token
     token_sent = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
     if token_sent == VERIFY_TOKEN:
         return challenge
-    return "Token invalide"
+    return "Erreur de vérification"
 
-@app.route('/webhook', methods=['POST'])
+# ✅ Réception des messages
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-    if data["object"] == "page":
+    print("📩 Event reçu:", data)  # log Render
+    
+    if "entry" in data:
         for entry in data["entry"]:
-            for messaging_event in entry["messaging"]:
-                sender_id = messaging_event["sender"]["id"]
-                if messaging_event.get("message"):
-                    message_text = messaging_event["message"].get("text")
-                    send_message(sender_id, "Bonjour ! 🤖\n1️⃣ Est-ce que vous voulez renouveller ?\n2️⃣ Est-ce que vous voulez un code d'identification du compte ?")
-    return "EVENT_RECEIVED", 200
+            if "messaging" in entry:
+                for event in entry["messaging"]:
+                    if "message" in event and "text" in event["message"]:
+                        sender_id = event["sender"]["id"]
+                        message_text = event["message"]["text"]
+                        print(f"Message de {sender_id}: {message_text}")
+                        send_buttons(sender_id)  # Réponse avec boutons
+    return "ok", 200
 
-def send_message(recipient_id, text):
-    url = f"https://graph.facebook.com/v23.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
+# ✅ Fonction pour envoyer des boutons
+def send_buttons(recipient_id):
+    url = f"https://graph.facebook.com/v17.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
+    
     payload = {
         "recipient": {"id": recipient_id},
-        "message": {"text": text}
+        "message": {
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "text": "Bienvenue 👋 Choisis une option :",
+                    "buttons": [
+                        {"type": "postback", "title": "Voir produits 🛍", "payload": "PRODUITS"},
+                        {"type": "postback", "title": "Contact 📞", "payload": "CONTACT"}
+                    ]
+                }
+            }
+        }
     }
-    requests.post(url, json=payload)
+    
+    response = requests.post(url, json=payload)
+    print("➡️ Réponse API:", response.status_code, response.text)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
