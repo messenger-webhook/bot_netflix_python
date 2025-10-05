@@ -9,7 +9,7 @@ app = Flask(__name__)
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 
-user_state = {}  # pour mémoriser l’état de chaque utilisateur
+user_state = {}  # mémorise l’état de chaque utilisateur
 
 @app.route("/", methods=["GET"])
 def home():
@@ -36,12 +36,9 @@ def webhook():
                 for event in entry["messaging"]:
                     sender_id = event["sender"]["id"]
 
-                    # Message texte reçu
                     if "message" in event and "text" in event["message"]:
                         message_text = event["message"]["text"]
                         handle_message(sender_id, message_text)
-
-                    # Bouton (postback) cliqué
                     elif "postback" in event:
                         payload = event["postback"]["payload"]
                         handle_postback(sender_id, payload)
@@ -52,12 +49,9 @@ def webhook():
 def handle_message(sender_id, message_text):
     message_text = message_text.strip().lower()
 
-    # Si c’est un nouveau client
     if sender_id not in user_state:
         send_main_menu(sender_id)
         user_state[sender_id] = "MAIN_MENU"
-
-    # Si l’utilisateur écrit autre chose après
     else:
         send_text(sender_id, "الرجاء اختيار زر من الأزرار 👇")
 
@@ -116,49 +110,67 @@ def send_main_menu(recipient_id):
 
 
 def send_achat_options(recipient_id):
+    # Premier message avec 3 boutons
     url = f"https://graph.facebook.com/v17.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {
+    payload1 = {
         "recipient": {"id": recipient_id},
         "message": {
             "attachment": {
                 "type": "template",
                 "payload": {
                     "template_type": "button",
-                    "text": "اختر الحساب الذي تريد من قائمة الحسابات التالية 👇",
+                    "text": "اختر الحساب الذي تريد من القائمة 👇",
                     "buttons": [
                         {"type": "postback", "title": "Netflix ✅", "payload": "NETFLIX"},
                         {"type": "postback", "title": "Shahid VIP ✅", "payload": "SHAHID"},
                         {"type": "postback", "title": "Spotify ✅", "payload": "SPOTIFY"},
+                    ],
+                },
+            }
+        },
+    }
+    requests.post(url, json=payload1)
+
+    # Deuxième message séparé pour Prime Video
+    payload2 = {
+        "recipient": {"id": recipient_id},
+        "message": {
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "text": "⬇️ عرض إضافي:",
+                    "buttons": [
                         {"type": "postback", "title": "Prime Video ✅", "payload": "PRIME"},
                     ],
                 },
             }
         },
     }
-    requests.post(url, json=payload)
+    requests.post(url, json=payload2)
 
 
 def send_price_list(recipient_id, service):
     prices = {
         "NETFLIX": """✅ Netflix
-شهر: 750 دج (بريدي موب / CCP)
-شهرين: 1400 دج
-3 أشهر: 2000 دج
+شهر 01 (بريدي موب / CCP): 750 دج
+شهرين 02: 1400 دج
+ثلاث 03 أشهر: 2000 دج
 بالفليكسي: +20%""",
         "SHAHID": """✅ Shahid VIP
-شهر: 600 دج (بريدي موب / CCP)
-شهرين: 1100 دج
-3 أشهر: 1500 دج
+شهر 01 (بريدي موب / CCP): 600 دج
+شهرين 02: 1100 دج
+ثلاث 03 أشهر: 1500 دج
 بالفليكسي: +20%""",
         "SPOTIFY": """✅ Spotify
-شهر: 600 دج (بريدي موب / CCP)
-شهرين: 1100 دج
-3 أشهر: 1500 دج
+شهر 01 (بريدي موب / CCP): 600 دج
+شهرين 02: 1100 دج
+ثلاث 03 أشهر: 1500 دج
 بالفليكسي: +20%""",
         "PRIME": """✅ Prime Video
-شهر: 600 دج (بريدي موب / CCP)
-شهرين: 1100 دج
-3 أشهر: 1500 دج
+شهر 01 (بريدي موب / CCP): 600 دج
+شهرين 02: 1100 دج
+ثلاث 03 أشهر: 1500 دج
 بالفليكسي: +20%""",
     }
 
