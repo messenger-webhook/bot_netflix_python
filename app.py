@@ -2,41 +2,37 @@ from flask import Flask, request
 import requests
 import os
 from dotenv import load_dotenv
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
+
+from step_renew import start_renew, process_email, confirm_payment, finalize_renew
 
 load_dotenv()
 app = Flask(__name__)
 
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "123456")
-
-# ================================
-# 🌐 Google Sheets setup
-# ================================
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-client = gspread.authorize(creds)
-sheet = client.open("netnet").worksheet("netnet1")
-
-# ================================
-# 🧠 Suivi des utilisateurs
-# ================================
-user_state = {}  # {sender_id: {"action": "renew", "email": "", "duration": 30}}
+ADMIN_ID = "24512169588466775"  # Ton ID admin Messenger
 
 # ================================
 # 📨 Fonction d’envoi de message
 # ================================
 def send_message(recipient_id, message, buttons=None):
     url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {"recipient": {"id": recipient_id}, "messaging_type": "RESPONSE", "message": {"text": message}}
-
+    payload = {
+        "recipient": {"id": recipient_id},
+        "messaging_type": "RESPONSE",
+        "message": {"text": message}
+    }
     if buttons:
         payload["message"] = {
-            "attachment": {"type": "template", "payload": {"template_type": "button", "text": message, "buttons": buttons}}
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "text": message,
+                    "buttons": buttons
+                }
+            }
         }
-
     print(f"📤 Envoi à {recipient_id} → {message[:40]}...")
     requests.post(url, json=payload)
 
@@ -47,14 +43,14 @@ def send_message(recipient_id, message, buttons=None):
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        if request.args.get("hub.verify_token") == VERIFY_TOKEN:
+        verify_token = "123456"
+        if request.args.get("hub.verify_token") == verify_token:
             print("✅ Vérification Webhook réussie !")
             return request.args.get("hub.challenge")
         return "Invalid verification token"
 
     data = request.get_json()
-    print("📩 Webhook POST reçu :")
-    print(data)
+    print("📩 Webhook POST reçu :", data)
 
     if not data or "entry" not in data:
         return "ok"
@@ -66,6 +62,7 @@ def webhook():
             if "postback" in event:
                 payload = event["postback"]["payload"]
                 handle_postback(sender_id, payload)
+
             elif "message" in event and "text" in event["message"]:
                 handle_message(sender_id, event["message"]["text"])
 
@@ -75,13 +72,31 @@ def webhook():
 # 🧠 Gestion des messages
 # ================================
 def handle_message(sender_id, text):
-    # Si en renouvellement
-    if sender_id in user_state and user_state[sender_id]["action"] == "renew" and "email" not in user_state[sender_id]:
-        user_state[sender_id]["email"] = text.strip()
-        check_email(sender_id, text.strip())
+    """Menu principal + réponses selon l'étape"""
+    # Si l'utilisateur est en mode renouvellement
+    if text.endswith("@renew"):
+        # text = email@renew
+        email = text.replace("@renew", "").strip()
+        sheet_row = process_email(sender_id, email)
+        if sheet_row:
+            send_message(sender_id, "Combien de jours voulez-vous ajouter ? (ex: 30)")
+            # On stocke temporairement l'email et l'étape
+            temp_user_state[sender_id] = {"step": "choose_days", "email": email, "sheet_row": sheet_row}
         return
 
-    # Menu principal
+    # Si l'utilisateur choisit les jours à ajouter
+    if sender_id in temp_user_state and temp_user_state[sender_id]["step"] == "choose_days":
+        try:
+            days = int(text)
+            temp_user_state[sender_id]["days"] = days
+            sheet_row = temp_user_state[sender_id]["sheet_row"]
+            confirm_payment(ADMIN_ID, sheet_row["nom client"], days, sheet_row)
+            temp_user_state[sender_id]["step"] = "waiting_admin"
+        except:
+            send_message(sender_id, "❌ Veuillez entrer un nombre valide de jours.")
+        return
+
+    # Menu principal classique
     welcome_buttons = [
         {"type": "postback", "title": "🛒 شراء حساب جديد", "payload": "ACHAT"},
         {"type": "postback", "title": "🔄 تجديد حسابك", "payload": "RENEW"},
@@ -90,9 +105,10 @@ def handle_message(sender_id, text):
     send_message(sender_id, "مرحبا بكم في صفحتنا ❤️", welcome_buttons)
 
 # ================================
-# 🎯 Gestion des boutons
+# 🔄 Gestion des boutons
 # ================================
 def handle_postback(sender_id, payload):
+    # ---------- Achat ----------
     if payload == "ACHAT":
         buttons = [
             {"type": "postback", "title": "✅ Netflix", "payload": "NETFLIX"},
@@ -101,63 +117,42 @@ def handle_postback(sender_id, payload):
         ]
         send_message(sender_id, "اختر الحساب الذي تريد من القائمة التالية 👇", buttons)
 
-    elif payload in ["NETFLIX", "SHAHID", "SPOTIFY"]:
-        send_prices(sender_id, payload)
-
+    # ---------- Renouvellement ----------
     elif payload == "RENEW":
-        user_state[sender_id] = {"action": "renew"}
-        send_message(sender_id, "يرجى ارسال الايميل الذي تريد تجديده")
+        start_renew(sender_id)
 
-    elif payload.startswith("DURATION_"):
-        days = int(payload.split("_")[1])
-        update_renewal(sender_id, days)
-
+    # ---------- Problème ----------
     elif payload == "PROBLEM":
         send_message(sender_id, "⚠️ أرسل مشكلتك بالتفصيل وسنقوم بمساعدتك في أقرب وقت 🙏")
 
-# ================================
-# 💰 Prix & Paiement
-# ================================
-def send_prices(sender_id, service):
-    prices = {
-        "NETFLIX": "💫 أسعار Netflix :\nشهر 01 : 750 دج\nشهرين 02 : 1400 دج\nثلاث 03 أشهر : 2000 دج\nاختر طريقة الدفع 💳",
-        "SHAHID": "💫 أسعار Shahid VIP :\nشهر 01 : 600 دج\nشهرين 02 : 1100 دج\nثلاث 03 أشهر : 1500 دج\nاختر طريقة الدفع 💳",
-        "SPOTIFY": "💫 أسعار Spotify :\nشهر 01 : 600 دج\nشهرين 02 : 1100 دج\nثلاث 03 أشهر : 1500 دج\nاختر طريقة الدفع 💳",
-    }
-    buttons = [
-        {"type": "postback", "title": "💸 بريدي موب / CCP", "payload": "PAY_BARIDI"},
-        {"type": "postback", "title": "📱 فليكسي +20%", "payload": "PAY_FLEXY"},
-    ]
-    send_message(sender_id, prices[service], buttons)
+    # ---------- Paiement ----------
+    elif payload.startswith("PAY_"):
+        if payload == "PAY_BARIDI":
+            send_message(sender_id, "🏦 معلومات الدفع :\nبريدي موب : 00799999004386752747\nCCP : 43867527 clé 11")
+        elif payload == "PAY_FLEXY":
+            send_message(sender_id, "📱 فليكسي : الرقم : 0654103330")
+
+    # ---------- Confirmation admin ----------
+    elif payload.startswith("CONFIRM_RENEW_"):
+        email = payload.replace("CONFIRM_RENEW_", "")
+        # On récupère les infos temporaires
+        for user_id, state in temp_user_state.items():
+            if state.get("email") == email:
+                finalize_renew(state["sheet_row"], state["days"])
+                send_message(user_id, f"✅ التجديد تم بنجاح! تم إضافة {state['days']} يوم.")
+                send_message(ADMIN_ID, f"✅ التجديد للعميل {state['sheet_row']['nom client']} تم.")
+                del temp_user_state[user_id]
+
+    elif payload == "CANCEL_RENEW":
+        send_message(ADMIN_ID, "❌ التجديد تم إلغاؤه.")
 
 # ================================
-# 🔁 Renouvellement
+# 🌟 Stockage temporaire des utilisateurs
 # ================================
-def check_email(sender_id, email):
-    records = sheet.get_all_records()
-    for row in records:
-        if row["email"].strip() == email:
-            user_state[sender_id]["row"] = row
-            send_message(sender_id, f"الايميل موجود ✅\nاختر المدة التي تريد تجديدها")
-            buttons = [
-                {"type": "postback", "title": "شهر 01", "payload": "DURATION_30"},
-                {"type": "postback", "title": "شهرين 02", "payload": "DURATION_60"},
-                {"type": "postback", "title": "ثلاث 03 أشهر", "payload": "DURATION_90"},
-            ]
-            send_message(sender_id, "اختر المدة 👇", buttons)
-            return
-    send_message(sender_id, "❌ الايميل غير موجود، يرجى التأكد وإعادة الإرسال")
+temp_user_state = {}
 
-def update_renewal(sender_id, days):
-    row = user_state[sender_id].get("row")
-    if not row:
-        send_message(sender_id, "❌ خطأ في العثور على الايميل")
-        return
-
-    # Calcul nouvelle date
-    current_date = datetime.strptime(row["date fin dinscription"], "%d/%m/%Y")
-    new_date = current_date + timedelta(days=days)
-    row_index = sheet.find(row["email"]).row
-    sheet.update_cell(row_index, 8, new_date.strftime("%d/%m/%Y"))
-
-    send_message(sender_id, f"✅ تم تحديث الحساب لمدة {days} يوم\nيرجى ارسال وصل الدفع")
+# ================================
+# 🚀 Lancement du serveur
+# ================================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
