@@ -3,7 +3,6 @@ import requests
 import os
 from dotenv import load_dotenv
 
-# Chargement des variables d'environnement
 load_dotenv()
 app = Flask(__name__)
 
@@ -15,34 +14,27 @@ PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 def send_message(recipient_id, message, buttons=None):
     """Envoi d’un message texte ou message avec boutons."""
     url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    headers = {"Content-Type": "application/json"}
+    payload = {
+        "recipient": {"id": recipient_id},
+        "messaging_type": "RESPONSE",
+        "message": {"text": message}
+    }
 
     if buttons:
-        payload = {
-            "recipient": {"id": recipient_id},
-            "messaging_type": "RESPONSE",
-            "message": {
-                "attachment": {
-                    "type": "template",
-                    "payload": {
-                        "template_type": "button",
-                        "text": message,
-                        "buttons": buttons
-                    }
+        payload["message"] = {
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "text": message,
+                    "buttons": buttons
                 }
             }
         }
-    else:
-        payload = {
-            "recipient": {"id": recipient_id},
-            "messaging_type": "RESPONSE",
-            "message": {"text": message}
-        }
 
     print(f"📤 Envoi à {recipient_id} → {message[:40]}...")
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code != 200:
-        print("⚠️ Erreur envoi :", response.text)
+    requests.post(url, json=payload)
+
 
 # ================================
 # 🌐 Webhook Messenger
@@ -57,35 +49,36 @@ def webhook():
             return request.args.get("hub.challenge")
         return "Invalid verification token"
 
-    # POST (messages et événements)
+    # Requête POST (message ou bouton)
     data = request.get_json()
     print("📩 Webhook POST reçu :")
     print(data)
 
     if not data or "entry" not in data:
+        print("⚠️ Données webhook invalides")
         return "ok"
 
     for entry in data["entry"]:
         for event in entry.get("messaging", []):
             sender_id = event["sender"]["id"]
 
-            # Gestion postback (boutons)
             if "postback" in event:
                 payload = event["postback"]["payload"]
                 print(f"🔥 Postback reçu : {payload}")
                 handle_postback(sender_id, payload)
 
-            # Gestion message texte
             elif "message" in event and "text" in event["message"]:
+                print(f"💬 Message texte reçu : {event['message']['text']}")
                 handle_message(sender_id, event["message"]["text"])
 
     return "ok"
 
+
 # ================================
-# 🧠 Gestion des messages texte
+# 🧠 Gestion des messages
 # ================================
 def handle_message(sender_id, text):
-    """Affiche le menu principal."""
+    """Affiche le menu principal quand un utilisateur écrit."""
     welcome_buttons = [
         {"type": "postback", "title": "🛒 شراء حساب جديد", "payload": "ACHAT"},
         {"type": "postback", "title": "🔄 تجديد حسابك", "payload": "RENEW"},
@@ -93,51 +86,30 @@ def handle_message(sender_id, text):
     ]
     send_message(sender_id, "مرحبا بكم في صفحتنا ❤️", welcome_buttons)
 
+
 # ================================
 # 🎯 Gestion des boutons
 # ================================
 def handle_postback(sender_id, payload):
-    """Réagit aux clics sur les boutons."""
+    """Gère les clics sur les boutons du bot Messenger."""
+
     if payload == "ACHAT":
-        buttons = [
-            {"type": "postback", "title": "📺 Netflix", "payload": "NETFLIX"},
-            {"type": "postback", "title": "🎥 Shahid VIP", "payload": "SHAHID"},
-            {"type": "postback", "title": "🎧 Spotify", "payload": "SPOTIFY"},
-            {"type": "postback", "title": "🎬 Prime Video", "payload": "PRIME"},
+        # Messenger n'accepte que 3 boutons par message
+        buttons1 = [
+            {"type": "postback", "title": "✅ Netflix", "payload": "NETFLIX"},
+            {"type": "postback", "title": "✅ Shahid VIP", "payload": "SHAHID"},
+            {"type": "postback", "title": "✅ Spotify", "payload": "SPOTIFY"},
         ]
-        send_message(sender_id, "📦 اختر الحساب الذي تريد من القائمة التالية 👇", buttons)
+        send_message(sender_id, "اختر الحساب الذي تريد من القائمة التالية 👇", buttons1)
 
-    elif payload in ["NETFLIX", "SHAHID", "SPOTIFY", "PRIME"]:
-        show_prices(sender_id, payload)
+        # Deuxième message pour le reste
+        buttons2 = [
+            {"type": "postback", "title": "✅ Prime Video", "payload": "PRIME"},
+        ]
+        send_message(sender_id, "📺 المزيد من الحسابات :", buttons2)
 
-    elif payload == "PAY_BARIDI":
-        send_message(sender_id, "🏦 الدفع عبر بريدي موب / CCP :\n\nبريدي موب : 00799999004386752747\nCCP : 43867527 clé 11")
-
-    elif payload == "PAY_FLEXY":
-        send_message(sender_id, "📱 الدفع عبر فليكسي :\n\nالرقم : 0654103330")
-
-    elif payload == "RENEW":
-        send_message(sender_id, "🔁 أرسل رقم الحساب الذي تريد تجديده 🆔")
-
-    elif payload == "PROBLEM":
-        send_message(sender_id, "⚠️ أرسل مشكلتك بالتفصيل وسنقوم بمساعدتك في أقرب وقت 🙏")
-
-# ================================
-# 💰 Tarifs par service
-# ================================
-def show_prices(sender_id, service):
-    """Affiche les prix selon le service choisi."""
-    if service == "NETFLIX":
-        title = "💫 أسعار Netflix :"
-    elif service == "SHAHID":
-        title = "💫 أسعار Shahid VIP :"
-    elif service == "SPOTIFY":
-        title = "💫 أسعار Spotify :"
-    else:
-        title = "💫 أسعار Prime Video :"
-
-    text = f"""{title}
-
+    elif payload == "NETFLIX":
+        text = """💫 أسعار Netflix :
 شهر 01 بالبريدي موب أو CCP : 750 دج
 شهر 01 بالفليكسي : 890 دج
 
@@ -148,20 +120,80 @@ def show_prices(sender_id, service):
 ثلاث 03 أشهر بالفليكسي : 2590 دج
 
 اختر طريقة الدفع 💳"""
-    payment_buttons(sender_id, text)
+        payment_buttons(sender_id, text)
+
+    elif payload == "SHAHID":
+        text = """💫 أسعار Shahid VIP :
+شهر 01 بالبريدي موب أو CCP : 600 دج
+شهر 01 بالفليكسي : 750 دج
+
+شهرين 02 بالبريدي موب أو CCP : 1100 دج
+شهرين 02 بالفليكسي : 1300 دج
+
+ثلاث 03 أشهر بالبريدي موب أو CCP : 1500 دج
+ثلاث 03 أشهر بالفليكسي : 1800 دج
+
+اختر طريقة الدفع 💳"""
+        payment_buttons(sender_id, text)
+
+    elif payload == "SPOTIFY":
+        text = """💫 أسعار Spotify :
+شهر 01 بالبريدي موب أو CCP : 600 دج
+شهر 01 بالفليكسي : 750 دج
+
+شهرين 02 بالبريدي موب أو CCP : 1100 دج
+شهرين 02 بالفليكسي : 1300 دج
+
+ثلاث 03 أشهر بالبريدي موب أو CCP : 1500 دج
+ثلاث 03 أشهر بالفليكسي : 1800 دج
+
+اختر طريقة الدفع 💳"""
+        payment_buttons(sender_id, text)
+
+    elif payload == "PRIME":
+        text = """💫 أسعار Prime Video :
+شهر 01 بالبريدي موب أو CCP : 600 دج
+شهر 01 بالفليكسي : 750 دج
+
+شهرين 02 بالبريدي موب أو CCP : 1100 دج
+شهرين 02 بالفليكسي : 1300 دج
+
+ثلاث 03 أشهر بالبريدي موب أو CCP : 1500 دج
+ثلاث 03 أشهر بالفليكسي : 1800 دج
+
+اختر طريقة الدفع 💳"""
+        payment_buttons(sender_id, text)
+
+    elif payload == "PAY_BARIDI":
+        send_message(sender_id, """🏦 معلومات الدفع :
+بريدي موب : 00799999004386752747
+CCP : 43867527 clé 11""")
+
+    elif payload == "PAY_FLEXY":
+        send_message(sender_id, """📱 فليكسي :
+الرقم : 0654103330""")
+
+    elif payload == "RENEW":
+        send_message(sender_id, "🔁 يرجى إرسال رقم الحساب الذي تريد تجديده 🆔")
+
+    elif payload == "PROBLEM":
+        send_message(sender_id, "⚠️ أرسل مشكلتك بالتفصيل وسنقوم بمساعدتك في أقرب وقت 🙏")
+
 
 # ================================
 # 💳 Boutons de paiement
 # ================================
 def payment_buttons(sender_id, text):
+    """Envoie les boutons de paiement (Baridi / Flexy)."""
     buttons = [
         {"type": "postback", "title": "💸 بريدي موب / CCP", "payload": "PAY_BARIDI"},
         {"type": "postback", "title": "📱 فليكسي +20%", "payload": "PAY_FLEXY"},
     ]
     send_message(sender_id, text, buttons)
 
+
 # ================================
-# 🚀 Lancement serveur
+# 🚀 Lancement du serveur
 # ================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
