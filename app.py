@@ -2,39 +2,43 @@ from flask import Flask, request
 import requests
 import os
 from dotenv import load_dotenv
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime, timedelta
 
 load_dotenv()
 app = Flask(__name__)
 
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "123456")
+
+# ================================
+# 🌐 Google Sheets setup
+# ================================
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+client = gspread.authorize(creds)
+sheet = client.open("netnet").worksheet("netnet1")
+
+# ================================
+# 🧠 Suivi des utilisateurs
+# ================================
+user_state = {}  # {sender_id: {"action": "renew", "email": "", "duration": 30}}
 
 # ================================
 # 📨 Fonction d’envoi de message
 # ================================
 def send_message(recipient_id, message, buttons=None):
-    """Envoi d’un message texte ou message avec boutons."""
     url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {
-        "recipient": {"id": recipient_id},
-        "messaging_type": "RESPONSE",
-        "message": {"text": message}
-    }
+    payload = {"recipient": {"id": recipient_id}, "messaging_type": "RESPONSE", "message": {"text": message}}
 
     if buttons:
         payload["message"] = {
-            "attachment": {
-                "type": "template",
-                "payload": {
-                    "template_type": "button",
-                    "text": message,
-                    "buttons": buttons
-                }
-            }
+            "attachment": {"type": "template", "payload": {"template_type": "button", "text": message, "buttons": buttons}}
         }
 
     print(f"📤 Envoi à {recipient_id} → {message[:40]}...")
     requests.post(url, json=payload)
-
 
 # ================================
 # 🌐 Webhook Messenger
@@ -43,19 +47,16 @@ def send_message(recipient_id, message, buttons=None):
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        verify_token = "123456"
-        if request.args.get("hub.verify_token") == verify_token:
+        if request.args.get("hub.verify_token") == VERIFY_TOKEN:
             print("✅ Vérification Webhook réussie !")
             return request.args.get("hub.challenge")
         return "Invalid verification token"
 
-    # Requête POST (message ou bouton)
     data = request.get_json()
     print("📩 Webhook POST reçu :")
     print(data)
 
     if not data or "entry" not in data:
-        print("⚠️ Données webhook invalides")
         return "ok"
 
     for entry in data["entry"]:
@@ -64,21 +65,23 @@ def webhook():
 
             if "postback" in event:
                 payload = event["postback"]["payload"]
-                print(f"🔥 Postback reçu : {payload}")
                 handle_postback(sender_id, payload)
-
             elif "message" in event and "text" in event["message"]:
-                print(f"💬 Message texte reçu : {event['message']['text']}")
                 handle_message(sender_id, event["message"]["text"])
 
     return "ok"
-
 
 # ================================
 # 🧠 Gestion des messages
 # ================================
 def handle_message(sender_id, text):
-    """Affiche le menu principal quand un utilisateur écrit."""
+    # Si en renouvellement
+    if sender_id in user_state and user_state[sender_id]["action"] == "renew" and "email" not in user_state[sender_id]:
+        user_state[sender_id]["email"] = text.strip()
+        check_email(sender_id, text.strip())
+        return
+
+    # Menu principal
     welcome_buttons = [
         {"type": "postback", "title": "🛒 شراء حساب جديد", "payload": "ACHAT"},
         {"type": "postback", "title": "🔄 تجديد حسابك", "payload": "RENEW"},
@@ -86,114 +89,75 @@ def handle_message(sender_id, text):
     ]
     send_message(sender_id, "مرحبا بكم في صفحتنا ❤️", welcome_buttons)
 
-
 # ================================
 # 🎯 Gestion des boutons
 # ================================
 def handle_postback(sender_id, payload):
-    """Gère les clics sur les boutons du bot Messenger."""
-
     if payload == "ACHAT":
-        # Messenger n'accepte que 3 boutons par message
-        buttons1 = [
+        buttons = [
             {"type": "postback", "title": "✅ Netflix", "payload": "NETFLIX"},
             {"type": "postback", "title": "✅ Shahid VIP", "payload": "SHAHID"},
             {"type": "postback", "title": "✅ Spotify", "payload": "SPOTIFY"},
         ]
-        send_message(sender_id, "اختر الحساب الذي تريد من القائمة التالية 👇", buttons1)
+        send_message(sender_id, "اختر الحساب الذي تريد من القائمة التالية 👇", buttons)
 
-        # Deuxième message pour le reste
-        buttons2 = [
-            {"type": "postback", "title": "✅ Prime Video", "payload": "PRIME"},
-        ]
-        send_message(sender_id, "📺 المزيد من الحسابات :", buttons2)
-
-    elif payload == "NETFLIX":
-        text = """💫 أسعار Netflix :
-شهر 01 بالبريدي موب أو CCP : 750 دج
-شهر 01 بالفليكسي : 890 دج
-
-شهرين 02 بالبريدي موب أو CCP : 1400 دج
-شهرين 02 بالفليكسي : 1790 دج
-
-ثلاث 03 أشهر بالبريدي موب أو CCP : 2000 دج
-ثلاث 03 أشهر بالفليكسي : 2590 دج
-
-اختر طريقة الدفع 💳"""
-        payment_buttons(sender_id, text)
-
-    elif payload == "SHAHID":
-        text = """💫 أسعار Shahid VIP :
-شهر 01 بالبريدي موب أو CCP : 600 دج
-شهر 01 بالفليكسي : 750 دج
-
-شهرين 02 بالبريدي موب أو CCP : 1100 دج
-شهرين 02 بالفليكسي : 1300 دج
-
-ثلاث 03 أشهر بالبريدي موب أو CCP : 1500 دج
-ثلاث 03 أشهر بالفليكسي : 1800 دج
-
-اختر طريقة الدفع 💳"""
-        payment_buttons(sender_id, text)
-
-    elif payload == "SPOTIFY":
-        text = """💫 أسعار Spotify :
-شهر 01 بالبريدي موب أو CCP : 600 دج
-شهر 01 بالفليكسي : 750 دج
-
-شهرين 02 بالبريدي موب أو CCP : 1100 دج
-شهرين 02 بالفليكسي : 1300 دج
-
-ثلاث 03 أشهر بالبريدي موب أو CCP : 1500 دج
-ثلاث 03 أشهر بالفليكسي : 1800 دج
-
-اختر طريقة الدفع 💳"""
-        payment_buttons(sender_id, text)
-
-    elif payload == "PRIME":
-        text = """💫 أسعار Prime Video :
-شهر 01 بالبريدي موب أو CCP : 600 دج
-شهر 01 بالفليكسي : 750 دج
-
-شهرين 02 بالبريدي موب أو CCP : 1100 دج
-شهرين 02 بالفليكسي : 1300 دج
-
-ثلاث 03 أشهر بالبريدي موب أو CCP : 1500 دج
-ثلاث 03 أشهر بالفليكسي : 1800 دج
-
-اختر طريقة الدفع 💳"""
-        payment_buttons(sender_id, text)
-
-    elif payload == "PAY_BARIDI":
-        send_message(sender_id, """🏦 معلومات الدفع :
-بريدي موب : 00799999004386752747
-CCP : 43867527 clé 11""")
-
-    elif payload == "PAY_FLEXY":
-        send_message(sender_id, """📱 فليكسي :
-الرقم : 0654103330""")
+    elif payload in ["NETFLIX", "SHAHID", "SPOTIFY"]:
+        send_prices(sender_id, payload)
 
     elif payload == "RENEW":
-        send_message(sender_id, "🔁 يرجى إرسال رقم الحساب الذي تريد تجديده 🆔")
+        user_state[sender_id] = {"action": "renew"}
+        send_message(sender_id, "يرجى ارسال الايميل الذي تريد تجديده")
+
+    elif payload.startswith("DURATION_"):
+        days = int(payload.split("_")[1])
+        update_renewal(sender_id, days)
 
     elif payload == "PROBLEM":
         send_message(sender_id, "⚠️ أرسل مشكلتك بالتفصيل وسنقوم بمساعدتك في أقرب وقت 🙏")
 
-
 # ================================
-# 💳 Boutons de paiement
+# 💰 Prix & Paiement
 # ================================
-def payment_buttons(sender_id, text):
-    """Envoie les boutons de paiement (Baridi / Flexy)."""
+def send_prices(sender_id, service):
+    prices = {
+        "NETFLIX": "💫 أسعار Netflix :\nشهر 01 : 750 دج\nشهرين 02 : 1400 دج\nثلاث 03 أشهر : 2000 دج\nاختر طريقة الدفع 💳",
+        "SHAHID": "💫 أسعار Shahid VIP :\nشهر 01 : 600 دج\nشهرين 02 : 1100 دج\nثلاث 03 أشهر : 1500 دج\nاختر طريقة الدفع 💳",
+        "SPOTIFY": "💫 أسعار Spotify :\nشهر 01 : 600 دج\nشهرين 02 : 1100 دج\nثلاث 03 أشهر : 1500 دج\nاختر طريقة الدفع 💳",
+    }
     buttons = [
         {"type": "postback", "title": "💸 بريدي موب / CCP", "payload": "PAY_BARIDI"},
         {"type": "postback", "title": "📱 فليكسي +20%", "payload": "PAY_FLEXY"},
     ]
-    send_message(sender_id, text, buttons)
-
+    send_message(sender_id, prices[service], buttons)
 
 # ================================
-# 🚀 Lancement du serveur
+# 🔁 Renouvellement
 # ================================
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+def check_email(sender_id, email):
+    records = sheet.get_all_records()
+    for row in records:
+        if row["email"].strip() == email:
+            user_state[sender_id]["row"] = row
+            send_message(sender_id, f"الايميل موجود ✅\nاختر المدة التي تريد تجديدها")
+            buttons = [
+                {"type": "postback", "title": "شهر 01", "payload": "DURATION_30"},
+                {"type": "postback", "title": "شهرين 02", "payload": "DURATION_60"},
+                {"type": "postback", "title": "ثلاث 03 أشهر", "payload": "DURATION_90"},
+            ]
+            send_message(sender_id, "اختر المدة 👇", buttons)
+            return
+    send_message(sender_id, "❌ الايميل غير موجود، يرجى التأكد وإعادة الإرسال")
+
+def update_renewal(sender_id, days):
+    row = user_state[sender_id].get("row")
+    if not row:
+        send_message(sender_id, "❌ خطأ في العثور على الايميل")
+        return
+
+    # Calcul nouvelle date
+    current_date = datetime.strptime(row["date fin dinscription"], "%d/%m/%Y")
+    new_date = current_date + timedelta(days=days)
+    row_index = sheet.find(row["email"]).row
+    sheet.update_cell(row_index, 8, new_date.strftime("%d/%m/%Y"))
+
+    send_message(sender_id, f"✅ تم تحديث الحساب لمدة {days} يوم\nيرجى ارسال وصل الدفع")
