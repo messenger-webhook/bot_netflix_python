@@ -1,0 +1,48 @@
+=============================== 
+Lancement du bot à 07/10/2025 19:56:47,29 
+Traceback (most recent call last):
+  File "C:\Users\LENOVO\Desktop\bot_netflix_python\auto_refresh_token.py", line 52, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\LENOVO\Desktop\bot_netflix_python\auto_refresh_token.py", line 43, in main
+    print("\U0001f501 V�rification et renouvellement du token de page...")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LENOVO\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f501' in position 0: character maps to <undefined>
+Fin d'exécution à 07/10/2025 19:56:48,82 
+=============================== 
+ 
+=============================== 
+Lancement du bot à 08/10/2025 18:23:29,65 
+Traceback (most recent call last):
+  File "C:\Users\LENOVO\Desktop\bot_netflix_python\auto_refresh_token.py", line 74, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\LENOVO\Desktop\bot_netflix_python\auto_refresh_token.py", line 64, in main
+    print("\U0001f501 V�rification et renouvellement du token de page...")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LENOVO\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f501' in position 0: character maps to <undefined>
+Fin d'exécution à 08/10/2025 18:23:30,34 
+=============================== 
+ 
+=============================== 
+Lancement du bot à 09/10/2025 20:24:00,79 
+Traceback (most recent call last):
+  File "C:\Users\LENOVO\Desktop\bot_netflix_python\auto_refresh_token.py", line 74, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\LENOVO\Desktop\bot_netflix_python\auto_refresh_token.py", line 64, in main
+    print("\U0001f501 V�rification et renouvellement du token de page...")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LENOVO\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f501' in position 0: character maps to <undefined>
+Fin d'exécution à 09/10/2025 20:24:01,80 
+=============================== 
+ 
