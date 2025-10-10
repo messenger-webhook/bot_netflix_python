@@ -1,67 +1,70 @@
+# ======================
+#   utils.py
+# ======================
 import os
 import requests
 import gspread
+from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
-from oauth2client.service_account import ServiceAccountCredentials
 
+# Charger les variables d’environnement
 load_dotenv()
 
-# === CONFIG ===
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-GOOGLE_SHEET_URL = os.getenv("GOOGLE_SHEET_URL")
-
-# === Google Sheets ===
-def get_sheet():
-    scope = ["https://spreadsheets.google.com/feeds",
-             "https://www.googleapis.com/auth/spreadsheets",
-             "https://www.googleapis.com/auth/drive.file",
-             "https://www.googleapis.com/auth/drive"]
-
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_url(GOOGLE_SHEET_URL).sheet1
-    return sheet
+SHEET_NAME = os.getenv("SHEET_NAME", "NetflixBot")
+WORKSHEET_NAME = os.getenv("WORKSHEET_NAME", "commandes")
+CREDENTIALS_PATH = os.getenv("CREDENTIALS_PATH", "credentials.json")
 
 
-# === Messenger ===
-def send_message(recipient_id, text, buttons=None):
-    """Envoie un message Messenger simple ou avec boutons"""
-    payload = {
-        "recipient": {"id": recipient_id},
-        "message": {"text": text}
-    }
+# =====================
+# 📤 Envoi de message Messenger
+# =====================
+def send_message(recipient_id, message_text, buttons=None):
+    """Envoie un message simple ou avec boutons à Messenger"""
+    url = f"https://graph.facebook.com/v19.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
 
     if buttons:
-        payload["message"] = {
-            "attachment": {
-                "type": "template",
-                "payload": {
-                    "template_type": "button",
-                    "text": text,
-                    "buttons": buttons
+        payload = {
+            "recipient": {"id": recipient_id},
+            "message": {
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "button",
+                        "text": message_text,
+                        "buttons": buttons,
+                    },
                 }
-            }
+            },
         }
+    else:
+        payload = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
 
-    response = requests.post(
-        f"https://graph.facebook.com/v19.0/me/messages?access_token={PAGE_ACCESS_TOKEN}",
-        json=payload
-    )
-    return response.status_code
+    headers = {"Content-Type": "application/json"}
+    response = requests.post(url, headers=headers, json=payload)
 
-
-def find_account_by_email(email):
-    """Recherche une ligne dans la feuille Google par email"""
-    sheet = get_sheet()
-    data = sheet.get_all_records()
-    for i, row in enumerate(data, start=2):
-        if str(row.get("email", "")).strip().lower() == email.strip().lower():
-            return i, row
-    return None, None
+    if response.status_code != 200:
+        print("❌ Erreur envoi Messenger :", response.text)
 
 
-def update_payment_status(row_index, paid=True):
-    """Met à jour la colonne 'payer'"""
-    sheet = get_sheet()
-    sheet.update_cell(row_index, 6, "oui" if paid else "non")
-    return True
+# =====================
+# 📊 Google Sheets : Ajouter ligne
+# =====================
+def append_to_sheet(data):
+    """Ajoute une commande dans la feuille Google Sheets"""
+    try:
+        creds = Credentials.from_service_account_file(CREDENTIALS_PATH)
+        client = gspread.authorize(creds)
+        sheet = client.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
+
+        sheet.append_row([
+            data.get("user_id"),
+            data.get("service"),
+            data.get("payment_type"),
+            data.get("status"),
+        ])
+
+        print("✅ Ligne ajoutée dans Google Sheets")
+
+    except Exception as e:
+        print("❌ Erreur Google Sheets :", e)
