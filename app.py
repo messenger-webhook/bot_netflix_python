@@ -1,158 +1,134 @@
-from flask import Flask, request
-import requests
 import os
+from flask import Flask, request
 from dotenv import load_dotenv
-from datetime import datetime, timedelta
-
-from step_renew import start_renew, process_email, confirm_payment, finalize_renew
+from utils import send_message
+from new_account import start_new_account, process_service_choice, confirm_new_account
+from renew_account import start_renew, process_email, confirm_payment
+from problem_account import handle_problem
 
 load_dotenv()
+
+# === CONFIG ===
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+
 app = Flask(__name__)
 
-PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-ADMIN_ID = "24512169588466775"  # Ton ID admin Messenger
+# =====================
+#   ROUTE DE WEBHOOK
+# =====================
+@app.route("/", methods=["GET"])
+def verify_webhook():
+    token_sent = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if token_sent == VERIFY_TOKEN:
+        return str(challenge)
+    return "Invalid verification token", 403
 
-# ================================
-# 📨 Fonction d’envoi de message
-# ================================
-def send_message(recipient_id, message, buttons=None):
-    url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {
-        "recipient": {"id": recipient_id},
-        "messaging_type": "RESPONSE",
-        "message": {"text": message}
-    }
-    if buttons:
-        payload["message"] = {
-            "attachment": {
-                "type": "template",
-                "payload": {
-                    "template_type": "button",
-                    "text": message,
-                    "buttons": buttons
-                }
-            }
-        }
-    print(f"📤 Envoi à {recipient_id} → {message[:40]}...")
-    requests.post(url, json=payload)
 
-# ================================
-# 🌐 Webhook Messenger
-# ================================
-@app.route("/", methods=["GET", "POST"])
-@app.route("/webhook", methods=["GET", "POST"])
-def webhook():
-    if request.method == "GET":
-        verify_token = "123456"
-        if request.args.get("hub.verify_token") == verify_token:
-            print("✅ Vérification Webhook réussie !")
-            return request.args.get("hub.challenge")
-        return "Invalid verification token"
-
+# =====================
+#   TRAITEMENT MESSAGE
+# =====================
+@app.route("/", methods=["POST"])
+def receive_message():
     data = request.get_json()
-    print("📩 Webhook POST reçu :", data)
 
-    if not data or "entry" not in data:
-        return "ok"
+    if "entry" not in data:
+        return "no_entry", 200
 
     for entry in data["entry"]:
-        for event in entry.get("messaging", []):
+        if "messaging" not in entry:
+            continue
+
+        for event in entry["messaging"]:
             sender_id = event["sender"]["id"]
 
-            if "postback" in event:
+            # Message texte
+            if "message" in event and "text" in event["message"]:
+                message_text = event["message"]["text"].strip().lower()
+                process_text_message(sender_id, message_text)
+
+            # Bouton postback (clic sur un bouton Messenger)
+            elif "postback" in event:
                 payload = event["postback"]["payload"]
-                handle_postback(sender_id, payload)
+                process_postback(sender_id, payload)
 
-            elif "message" in event and "text" in event["message"]:
-                handle_message(sender_id, event["message"]["text"])
+    return "ok", 200
 
-    return "ok"
 
-# ================================
-# 🧠 Gestion des messages
-# ================================
-def handle_message(sender_id, text):
-    """Menu principal + réponses selon l'étape"""
-    # Si l'utilisateur est en mode renouvellement
-    if text.endswith("@renew"):
-        # text = email@renew
-        email = text.replace("@renew", "").strip()
-        sheet_row = process_email(sender_id, email)
-        if sheet_row:
-            send_message(sender_id, "Combien de jours voulez-vous ajouter ? (ex: 30)")
-            # On stocke temporairement l'email et l'étape
-            temp_user_state[sender_id] = {"step": "choose_days", "email": email, "sheet_row": sheet_row}
-        return
+# =====================
+#   TRAITEMENT TEXTE
+# =====================
+def process_text_message(user_id, message):
+    """Traite un message texte classique"""
 
-    # Si l'utilisateur choisit les jours à ajouter
-    if sender_id in temp_user_state and temp_user_state[sender_id]["step"] == "choose_days":
-        try:
-            days = int(text)
-            temp_user_state[sender_id]["days"] = days
-            sheet_row = temp_user_state[sender_id]["sheet_row"]
-            confirm_payment(ADMIN_ID, sheet_row["nom client"], days, sheet_row)
-            temp_user_state[sender_id]["step"] = "waiting_admin"
-        except:
-            send_message(sender_id, "❌ Veuillez entrer un nombre valide de jours.")
-        return
+    # Commande de démarrage
+    if message in ["start", "bonjour", "salut", "menu"]:
+        send_main_menu(user_id)
 
-    # Menu principal classique
-    welcome_buttons = [
-        {"type": "postback", "title": "🛒 شراء حساب جديد", "payload": "ACHAT"},
-        {"type": "postback", "title": "🔄 تجديد حسابك", "payload": "RENEW"},
-        {"type": "postback", "title": "⚠️ مشكل في حسابك", "payload": "PROBLEM"},
-    ]
-    send_message(sender_id, "مرحبا بكم في صفحتنا ❤️", welcome_buttons)
+    # Si l’utilisateur envoie un email → on suppose qu’il renouvelle
+    elif "@" in message and "." in message:
+        process_email(user_id, message)
 
-# ================================
-# 🔄 Gestion des boutons
-# ================================
-def handle_postback(sender_id, payload):
-    # ---------- Achat ----------
-    if payload == "ACHAT":
-        buttons = [
-            {"type": "postback", "title": "✅ Netflix", "payload": "NETFLIX"},
-            {"type": "postback", "title": "✅ Shahid VIP", "payload": "SHAHID"},
-            {"type": "postback", "title": "✅ Spotify", "payload": "SPOTIFY"},
-        ]
-        send_message(sender_id, "اختر الحساب الذي تريد من القائمة التالية 👇", buttons)
+    else:
+        send_message(user_id, "📋 ارسل 'menu' لعرض الخيارات.")
 
-    # ---------- Renouvellement ----------
-    elif payload == "RENEW":
-        start_renew(sender_id)
 
-    # ---------- Problème ----------
-    elif payload == "PROBLEM":
-        send_message(sender_id, "⚠️ أرسل مشكلتك بالتفصيل وسنقوم بمساعدتك في أقرب وقت 🙏")
+# =====================
+#   TRAITEMENT BOUTONS
+# =====================
+def process_postback(user_id, payload):
+    """Traite les clics sur les boutons Messenger"""
 
-    # ---------- Paiement ----------
-    elif payload.startswith("PAY_"):
-        if payload == "PAY_BARIDI":
-            send_message(sender_id, "🏦 معلومات الدفع :\nبريدي موب : 00799999004386752747\nCCP : 43867527 clé 11")
-        elif payload == "PAY_FLEXY":
-            send_message(sender_id, "📱 فليكسي : الرقم : 0654103330")
+    if payload == "START_NEW":
+        start_new_account(user_id)
 
-    # ---------- Confirmation admin ----------
+    elif payload == "START_RENEW":
+        start_renew(user_id)
+
+    elif payload == "START_PROBLEM":
+        handle_problem(user_id)
+
+    # === Gestion achat ===
+    elif payload.startswith("NEW_") and "_1M" not in payload and "_3M" not in payload:
+        service_name = payload.replace("NEW_", "")
+        process_service_choice(user_id, service_name)
+
+    elif payload.endswith("_1M"):
+        service_name = payload.replace("NEW_", "").replace("_1M", "")
+        confirm_new_account(user_id, service_name, "1 mois")
+
+    elif payload.endswith("_3M"):
+        service_name = payload.replace("NEW_", "").replace("_3M", "")
+        confirm_new_account(user_id, service_name, "3 mois")
+
+    # === Gestion renouvellement ===
     elif payload.startswith("CONFIRM_RENEW_"):
-        email = payload.replace("CONFIRM_RENEW_", "")
-        # On récupère les infos temporaires
-        for user_id, state in temp_user_state.items():
-            if state.get("email") == email:
-                finalize_renew(state["sheet_row"], state["days"])
-                send_message(user_id, f"✅ التجديد تم بنجاح! تم إضافة {state['days']} يوم.")
-                send_message(ADMIN_ID, f"✅ التجديد للعميل {state['sheet_row']['nom client']} تم.")
-                del temp_user_state[user_id]
+        row_index = int(payload.split("_")[-1])
+        confirm_payment(user_id, row_index)
 
     elif payload == "CANCEL_RENEW":
-        send_message(ADMIN_ID, "❌ التجديد تم إلغاؤه.")
+        send_message(user_id, "❌ Renouvellement annulé.")
 
-# ================================
-# 🌟 Stockage temporaire des utilisateurs
-# ================================
-temp_user_state = {}
+    else:
+        send_message(user_id, "⚠️ Commande non reconnue.")
 
-# ================================
-# 🚀 Lancement du serveur
-# ================================
+
+# =====================
+#   MENU PRINCIPAL
+# =====================
+def send_main_menu(user_id):
+    text = "🎬 مرحبا بك في بوت NETNET\nاختر ما تريد 👇"
+    buttons = [
+        {"type": "postback", "title": "🛒 شراء حساب جديد", "payload": "START_NEW"},
+        {"type": "postback", "title": "🔄 تجديد حسابك", "payload": "START_RENEW"},
+        {"type": "postback", "title": "⚠️ مشكل في حسابك", "payload": "START_PROBLEM"},
+    ]
+    send_message(user_id, text, buttons)
+
+
+# =====================
+#   LANCEMENT APP
+# =====================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=5000)
