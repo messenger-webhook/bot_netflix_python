@@ -15,9 +15,9 @@ PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
 app = Flask(__name__)
 
 # =====================
-#   ROUTE DE WEBHOOK
+#   WEBHOOK FACEBOOK
 # =====================
-@app.route("/", methods=["GET"])
+@app.route("/webhook", methods=["GET"])
 def verify_webhook():
     token_sent = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
@@ -26,10 +26,7 @@ def verify_webhook():
     return "Invalid verification token", 403
 
 
-# =====================
-#   TRAITEMENT MESSAGE
-# =====================
-@app.route("/", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def receive_message():
     data = request.get_json()
 
